@@ -139,16 +139,18 @@ Settings.prototype.get = function (key, def) {
 			obj = obj[part];
 		}
 	}
-	if (obj === undefined) {
-		if (def === undefined) {
-			def = this.defCfg;
-			for (let j = 0; j < parts.length; j += 1) {
-				part = parts[j];
-				if (part && def != null) {
-					def = def[part];
-				}
+	if (obj === undefined && def === undefined) {
+		def = this.defCfg;
+		for (let j = 0; j < parts.length; j += 1) {
+			part = parts[j];
+			if (part && def != null) {
+				def = def[part];
 			}
 		}
+		return def;
+	}
+	// this is uncovered
+	if (obj === undefined) {
 		return def;
 	}
 	return obj;
