@@ -45,6 +45,21 @@ app.onDomReady();
 		});
 	}
 
+	// Logout timer start logic
+	function startLogoutTimer() {
+		if (app.config.adminReloginDuration <= 0) {
+			return;
+		}
+
+		if (logoutTimer) {
+			clearTimeout(logoutTimer);
+		}
+
+		logoutTimer = setTimeout(() => {
+			showLogoutAlert();
+		}, 3600000); 
+	}
+
 	require(['hooks', 'admin/settings'], (hooks, Settings) => {
 		hooks.on('action:ajaxify.end', (data) => {
 			updatePageTitle(data.url);
