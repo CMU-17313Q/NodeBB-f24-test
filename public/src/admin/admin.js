@@ -12,22 +12,23 @@ app.onDomReady();
 (function () {
 	let logoutTimer = 0;
 	let logoutMessage;
-	function startLogoutTimer() {
-		if (app.config.adminReloginDuration <= 0) {
-			return;
-		}
-		if (logoutTimer) {
-			clearTimeout(logoutTimer);
-		}
-		// pre-translate language string gh#9046
-		if (!logoutMessage) {
-			require(['translator'], function (translator) {
-				translator.translate('[[login:logged-out-due-to-inactivity]]', function (translated) {
-					logoutMessage = translated;
-				});
-			});
-		}
 
+	// Separate the translation logic into a function that returns a promise
+	function getLogoutMessage() {
+		return new Promise((resolve, reject) => {
+			if (logoutMessage) {
+				resolve(logoutMessage);
+			} else {
+				require(['translator'], function (translator) {
+					translator.translate('[[login:logged-out-due-to-inactivity]]', 
+					function (translated) {
+						logoutMessage = translated;
+						resolve(logoutMessage);
+					});
+				});
+			}
+		});
+	}
 		logoutTimer = setTimeout(function () {
 			require(['bootbox'], function (bootbox) {
 				bootbox.alert({
