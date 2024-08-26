@@ -29,17 +29,20 @@ app.onDomReady();
 			}
 		});
 	}
-		logoutTimer = setTimeout(function () {
+	
+	// Separate the bootbox logic into its own function
+	function showLogoutAlert() {
+		getLogoutMessage().then((message) => {
 			require(['bootbox'], function (bootbox) {
 				bootbox.alert({
 					closeButton: false,
-					message: logoutMessage,
+					message: message,
 					callback: function () {
 						window.location.reload();
 					},
 				});
 			});
-		}, 3600000);
+		});
 	}
 
 	require(['hooks', 'admin/settings'], (hooks, Settings) => {
