@@ -15,21 +15,20 @@ app.onDomReady();
 
 	// Separate the translation logic into a function that returns a promise
 	function getLogoutMessage() {
-		return new Promise((resolve, reject) => {
+		return new Promise((resolve) => {
 			if (logoutMessage) {
 				resolve(logoutMessage);
 			} else {
 				require(['translator'], function (translator) {
-					translator.translate('[[login:logged-out-due-to-inactivity]]', 
-					function (translated) {
-						logoutMessage = translated;
-						resolve(logoutMessage);
-					});
+					translator.translate('[[login:logged-out-due-to-inactivity]]',
+						function (translated) {
+							logoutMessage = translated;
+							resolve(logoutMessage);
+						});
 				});
 			}
 		});
 	}
-	
 	// Separate the bootbox logic into its own function
 	function showLogoutAlert() {
 		getLogoutMessage().then((message) => {
@@ -57,9 +56,8 @@ app.onDomReady();
 
 		logoutTimer = setTimeout(() => {
 			showLogoutAlert();
-		}, 3600000); 
+		}, 3600000);
 	}
-
 	require(['hooks', 'admin/settings'], (hooks, Settings) => {
 		hooks.on('action:ajaxify.end', (data) => {
 			updatePageTitle(data.url);
