@@ -14,17 +14,20 @@ app.onDomReady();
 	let logoutMessage;
 
 	// Separate the translation logic into a function that returns a promise
+	function translateMessage(callback) {
+		require(['translator'], function (translator) {
+			translator.translate('[[login:logged-out-due-to-inactivity]]', callback);
+		});
+	}
+	// Separate function to generate the logout message
 	function getLogoutMessage() {
 		return new Promise((resolve) => {
 			if (logoutMessage) {
 				resolve(logoutMessage);
 			} else {
-				require(['translator'], function (translator) {
-					translator.translate('[[login:logged-out-due-to-inactivity]]',
-						function (translated) {
-							logoutMessage = translated;
-							resolve(logoutMessage);
-						});
+				translateMessage((translated) => {
+					logoutMessage = translated;
+					resolve(logoutMessage);
 				});
 			}
 		});
