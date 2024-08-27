@@ -12,35 +12,55 @@ app.onDomReady();
 (function () {
 	let logoutTimer = 0;
 	let logoutMessage;
-	function startLogoutTimer() {
-		if (app.config.adminReloginDuration <= 0) {
-			return;
-		}
-		if (logoutTimer) {
-			clearTimeout(logoutTimer);
-		}
-		// pre-translate language string gh#9046
-		if (!logoutMessage) {
-			require(['translator'], function (translator) {
-				translator.translate('[[login:logged-out-due-to-inactivity]]', function (translated) {
-					logoutMessage = translated;
-				});
-			});
-		}
 
-		logoutTimer = setTimeout(function () {
+	// Separate the translation logic into a function that returns a promise
+	function translateMessage(callback) {
+		require(['translator'], function (translator) {
+			translator.translate('[[login:logged-out-due-to-inactivity]]', callback);
+		});
+	}
+	// Separate function to generate the logout message
+	function getLogoutMessage() {
+		return new Promise((resolve) => {
+			if (logoutMessage) {
+				resolve(logoutMessage);
+			} else {
+				translateMessage((translated) => {
+					logoutMessage = translated;
+					resolve(logoutMessage);
+				});
+			}
+		});
+	}
+	// Separate the bootbox logic into its own function
+	function showLogoutAlert() {
+		getLogoutMessage().then((message) => {
 			require(['bootbox'], function (bootbox) {
 				bootbox.alert({
 					closeButton: false,
-					message: logoutMessage,
+					message: message,
 					callback: function () {
 						window.location.reload();
 					},
 				});
 			});
-		}, 3600000);
+		});
 	}
 
+	// Logout timer start logic
+	function startLogoutTimer() {
+		if (app.config.adminReloginDuration <= 0) {
+			return;
+		}
+
+		if (logoutTimer) {
+			clearTimeout(logoutTimer);
+		}
+
+		logoutTimer = setTimeout(() => {
+			showLogoutAlert();
+		}, 3600000);
+	}
 	require(['hooks', 'admin/settings'], (hooks, Settings) => {
 		hooks.on('action:ajaxify.end', (data) => {
 			updatePageTitle(data.url);
