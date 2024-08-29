@@ -104,8 +104,8 @@ async function buildNamespace(language, namespace) {
 		let title = namespace.match(/admin\/(.+?)\/(.+?)$/);
 
 		if (title) {
-			let section = title[1] === 'development' ? 'advanced' : title[1];
-			let subsection = title[2] ? ` > [[admin/menu:${section}/${title[2]}]]` : '';
+			const section = title[1] === 'development' ? 'advanced' : title[1];
+			const subsection = title[2] ? ` > [[admin/menu:${section}/${title[2]}]]` : '';
 			title = `[[admin/menu:section-${section}]]${subsection}`;
 
 			// Translate the title
