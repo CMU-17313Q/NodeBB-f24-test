@@ -734,68 +734,10 @@ Flags.update = async function (flagId, uid, changeset) {
 		return;
 	}
 	const now = changeset.datetime || Date.now();
-	const notifyAssignee = async function (assigneeId) {
-		if (assigneeId === '' || parseInt(uid, 10) === parseInt(assigneeId, 10)) {
-			return;
-		}
-		const notifObj = await notifications.create({
-			type: 'my-flags',
-			bodyShort: `[[notifications:flag-assigned-to-you, ${flagId}]]`,
-			bodyLong: '',
-			path: `/flags/${flagId}`,
-			nid: `flags:assign:${flagId}:uid:${assigneeId}`,
-			from: uid,
-		});
-		await notifications.push(notifObj, [assigneeId]);
-	};
-	const isAssignable = async function (assigneeId) {
-		let allowed = false;
-		allowed = await user.isAdminOrGlobalMod(assigneeId);
 
-		// Mods are also allowed to be assigned, if flag target is post in uid's moderated cid
-		if (!allowed && current.type === 'post') {
-			const cid = await posts.getCidByPid(current.targetId);
-			allowed = await user.isModerator(assigneeId, cid);
-		}
-
-		return allowed;
-	};
-
-	async function rescindNotifications(match) {
-		const nids = await db.getSortedSetScan({ key: 'notifications', match: `${match}*` });
-		return notifications.rescind(nids);
-	}
-
-	// Retrieve existing flag data to compare for history-saving/reference purposes
 	const tasks = [];
-	for (const prop of Object.keys(changeset)) {
-		if (current[prop] === changeset[prop]) {
-			delete changeset[prop];
-		} else if (prop === 'state') {
-			if (!Flags._states.has(changeset[prop])) {
-				delete changeset[prop];
-			} else {
-				tasks.push(db.sortedSetAdd(`flags:byState:${changeset[prop]}`, now, flagId));
-				tasks.push(db.sortedSetRemove(`flags:byState:${current[prop]}`, flagId));
-				if (changeset[prop] === 'resolved' && meta.config['flags:actionOnResolve'] === 'rescind') {
-					tasks.push(rescindNotifications(`flag:${current.type}:${current.targetId}`));
-				}
-				if (changeset[prop] === 'rejected' && meta.config['flags:actionOnReject'] === 'rescind') {
-					tasks.push(rescindNotifications(`flag:${current.type}:${current.targetId}`));
-				}
-			}
-		} else if (prop === 'assignee') {
-			if (changeset[prop] === '') {
-				tasks.push(db.sortedSetRemove(`flags:byAssignee:${changeset[prop]}`, flagId));
-			/* eslint-disable-next-line */
-			} else if (!await isAssignable(parseInt(changeset[prop], 10))) {
-				delete changeset[prop];
-			} else {
-				tasks.push(db.sortedSetAdd(`flags:byAssignee:${changeset[prop]}`, now, flagId));
-				tasks.push(notifyAssignee(changeset[prop]));
-			}
-		}
-	}
+	await processStateChange(tasks, current, changeset, now, flagId);
+	await processAssigneeChange(tasks, current, changeset, uid, now, flagId);
 
 	if (!Object.keys(changeset).length) {
 		return;
@@ -807,6 +749,72 @@ Flags.update = async function (flagId, uid, changeset) {
 
 	plugins.hooks.fire('action:flags.update', { flagId: flagId, changeset: changeset, uid: uid });
 };
+
+async function processStateChange(tasks, current, changeset, now, flagId) {
+	if (changeset.state && changeset.state !== current.state) {
+		if (Flags._states.has(changeset.state)) {
+			tasks.push(db.sortedSetAdd(`flags:byState:${changeset.state}`, now, flagId));
+			tasks.push(db.sortedSetRemove(`flags:byState:${current.state}`, flagId));
+			if (shouldRescindNotifications(changeset.state)) {
+				tasks.push(rescindNotifications(`flag:${current.type}:${current.targetId}`));
+			}
+		} else {
+			delete changeset.state;
+		}
+	}
+}
+
+async function processAssigneeChange(tasks, current, changeset, uid, now, flagId) {
+	if (changeset.assignee && changeset.assignee !== current.assignee) {
+		if (changeset.assignee === '') {
+			tasks.push(db.sortedSetRemove(`flags:byAssignee:${current.assignee}`, flagId));
+		} else if (await isAssignable(parseInt(changeset.assignee, 10), current)) {
+			tasks.push(db.sortedSetAdd(`flags:byAssignee:${changeset.assignee}`, now, flagId));
+			tasks.push(notifyAssignee(changeset.assignee, uid, flagId));
+		} else {
+			delete changeset.assignee;
+		}
+	}
+}
+
+function shouldRescindNotifications(state) {
+	return (
+		(state === 'resolved' && meta.config['flags:actionOnResolve'] === 'rescind') ||
+		(state === 'rejected' && meta.config['flags:actionOnReject'] === 'rescind')
+	);
+}
+
+async function notifyAssignee(assigneeId, uid, flagId) {
+	if (assigneeId === '' || parseInt(uid, 10) === parseInt(assigneeId, 10)) {
+		return;
+	}
+	const notifObj = await notifications.create({
+		type: 'my-flags',
+		bodyShort: `[[notifications:flag-assigned-to-you, ${flagId}]]`,
+		bodyLong: '',
+		path: `/flags/${flagId}`,
+		nid: `flags:assign:${flagId}:uid:${assigneeId}`,
+		from: uid,
+	});
+	await notifications.push(notifObj, [assigneeId]);
+}
+
+async function isAssignable(assigneeId, current) {
+	let allowed = await user.isAdminOrGlobalMod(assigneeId);
+
+	// Mods are also allowed to be assigned if the flag target is a post in uid's moderated cid
+	if (!allowed && current.type === 'post') {
+		const cid = await posts.getCidByPid(current.targetId);
+		allowed = await user.isModerator(assigneeId, cid);
+	}
+
+	return allowed;
+}
+
+async function rescindNotifications(match) {
+	const nids = await db.getSortedSetScan({ key: 'notifications', match: `${match}*` });
+	return notifications.rescind(nids);
+}
 
 Flags.resolveFlag = async function (type, id, uid) {
 	const flagId = await Flags.getFlagIdByTarget(type, id);
