@@ -151,10 +151,18 @@ Flags.getFlagIdsWithFilters = async function ({ filters, uid, query }) {
 	}
 	sets = (sets.length || orSets.length) ? sets : ['flags:datetime']; // No filter default
 
-	let flagIds = await getFlagIdsFromSets(sets);
+	let flagIds = [];
+	if (sets.length === 1) {
+		flagIds = await db.getSortedSetRevRange(sets[0], 0, -1);
+	} else if (sets.length > 1) {
+		flagIds = await db.getSortedSetRevIntersect({ sets: sets, start: 0, stop: -1, aggregate: 'MAX' });
+	}
 
 	if (orSets.length) {
-		const _flagIds = await getFlagIdsFromOrSets(orSets);
+		let _flagIds = await Promise.all(orSets.map(async orSet => await db.getSortedSetRevUnion({ sets: orSet, start: 0, stop: -1, aggregate: 'MAX' })));
+
+		// Each individual orSet is ANDed together to construct the final list of flagIds
+		_flagIds = _.intersection(..._flagIds);
 
 		// Merge with flagIds returned by sets
 		if (sets.length) {
@@ -174,21 +182,6 @@ Flags.getFlagIdsWithFilters = async function ({ filters, uid, query }) {
 	});
 	return result.flagIds;
 };
-
-async function getFlagIdsFromSets(sets) {
-	if (sets.length === 1) {
-		return await db.getSortedSetRevRange(sets[0], 0, -1);
-	} else if (sets.length > 1) {
-		return await db.getSortedSetRevIntersect({ sets: sets, start: 0, stop: -1, aggregate: 'MAX' });
-	}
-	return [];
-}
-
-async function getFlagIdsFromOrSets(orSets) {
-	const _flagIds = await Promise.all(orSets.map(async orSet => await db.getSortedSetRevUnion({ sets: orSet, start: 0, stop: -1, aggregate: 'MAX' })));
-	return _.intersection(..._flagIds);
-}
-
 
 Flags.list = async function (data) {
 	const filters = data.filters || {};
@@ -286,42 +279,66 @@ Flags.validate = async function (payload) {
 		user.getUserData(payload.uid),
 	]);
 
-	if (!target) {
-		throw new Error('[[error:invalid-data]]');
-	} else if (target.deleted) {
-		throw new Error('[[error:post-deleted]]');
-	} else if (!reporter || !reporter.userslug) {
-		throw new Error('[[error:no-user]]');
-	} else if (reporter.banned) {
-		throw new Error('[[error:user-banned]]');
-	}
+	validateTarget(target);
+	validateReporter(reporter);
 
 	// Disallow flagging of profiles/content of privileged users
 	const [targetPrivileged, reporterPrivileged] = await Promise.all([
 		user.isPrivileged(target.uid),
 		user.isPrivileged(reporter.uid),
 	]);
+
 	if (targetPrivileged && !reporterPrivileged) {
 		throw new Error('[[error:cant-flag-privileged]]');
 	}
 
 	if (payload.type === 'post') {
-		const editable = await privileges.posts.canEdit(payload.id, payload.uid);
-		if (!editable.flag && !meta.config['reputation:disabled'] && reporter.reputation < meta.config['min:rep:flag']) {
-			throw new Error(`[[error:not-enough-reputation-to-flag, ${meta.config['min:rep:flag']}]]`);
-		}
+		await validatePostFlagging(payload, reporter);
 	} else if (payload.type === 'user') {
-		if (parseInt(payload.id, 10) === parseInt(payload.uid, 10)) {
-			throw new Error('[[error:cant-flag-self]]');
-		}
-		const editable = await privileges.users.canEdit(payload.uid, payload.id);
-		if (!editable && !meta.config['reputation:disabled'] && reporter.reputation < meta.config['min:rep:flag']) {
-			throw new Error(`[[error:not-enough-reputation-to-flag, ${meta.config['min:rep:flag']}]]`);
-		}
+		validateUserFlagging(payload);
+		await validateUserEditPrivilege(payload, reporter);
 	} else {
 		throw new Error('[[error:invalid-data]]');
 	}
 };
+
+function validateTarget(target) {
+	if (!target) {
+		throw new Error('[[error:invalid-data]]');
+	}
+	if (target.deleted) {
+		throw new Error('[[error:post-deleted]]');
+	}
+}
+
+function validateReporter(reporter) {
+	if (!reporter || !reporter.userslug) {
+		throw new Error('[[error:no-user]]');
+	}
+	if (reporter.banned) {
+		throw new Error('[[error:user-banned]]');
+	}
+}
+
+async function validatePostFlagging(payload, reporter) {
+	const editable = await privileges.posts.canEdit(payload.id, payload.uid);
+	if (!editable.flag && !meta.config['reputation:disabled'] && reporter.reputation < meta.config['min:rep:flag']) {
+		throw new Error(`[[error:not-enough-reputation-to-flag, ${meta.config['min:rep:flag']}]]`);
+	}
+}
+
+function validateUserFlagging(payload) {
+	if (parseInt(payload.id, 10) === parseInt(payload.uid, 10)) {
+		throw new Error('[[error:cant-flag-self]]');
+	}
+}
+
+async function validateUserEditPrivilege(payload, reporter) {
+	const editable = await privileges.users.canEdit(payload.uid, payload.id);
+	if (!editable && !meta.config['reputation:disabled'] && reporter.reputation < meta.config['min:rep:flag']) {
+		throw new Error(`[[error:not-enough-reputation-to-flag, ${meta.config['min:rep:flag']}]]`);
+	}
+}
 
 Flags.getNotes = async function (flagId) {
 	let notes = await db.getSortedSetRevRangeWithScores(`flag:${flagId}:notes`, 0, -1);
